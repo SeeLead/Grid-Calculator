@@ -204,6 +204,19 @@
         </div>
       </div>
 
+      <div class="field">
+        <label>Harga Entry Posisi 1 <span class="hint">opsional</span></label>
+        <input type="number" id="entryPrice" value="" step="0.01" min="0" placeholder="mis. 2400.00">
+      </div>
+
+      <div class="field">
+        <label>Arah Posisi <span class="hint">buy / sell</span></label>
+        <select id="direction" style="width:100%; background:var(--bg); border:1px solid var(--line); color:var(--text); padding:9px 10px; border-radius:4px; font-family:'IBM Plex Mono',monospace; font-size:14px;">
+          <option value="buy">Buy</option>
+          <option value="sell">Sell</option>
+        </select>
+      </div>
+
       <details>
         <summary>▸ Lanjutan</summary>
         <div class="field">
@@ -244,6 +257,7 @@
               <tr>
                 <th>#</th>
                 <th>Lot</th>
+                <th>Rata-rata</th>
                 <th>Loss Posisi</th>
                 <th>Kumulatif</th>
               </tr>
@@ -300,6 +314,8 @@ function compute(){
   const maxLot = parseFloat($('maxLot').value) || 0;
   const pipValue = parseFloat($('pipValue').value) || 1;
   const balanceUsd = parseFloat($('balance').value);
+  const entryPrice = parseFloat($('entryPrice').value);
+  const direction = $('direction').value;
 
   const rows = [];
   let totalLot = 0;
@@ -309,12 +325,30 @@ function compute(){
   }
 
   let cumLossUsc = 0;
+  let lotSum = 0;
+  let weightedPipsSum = 0;
   for(let i=1;i<=n;i++){
     const lot = lots[i-1];
     const lossUsc = (lot/0.01) * pipValue * ((n-i)*addPips);
     cumLossUsc += lossUsc;
     totalLot += lot;
-    rows.push({i, lot, lossUsc, cumLossUsc});
+
+    const distFromStart = (i-1)*addPips;
+    lotSum += lot;
+    weightedPipsSum += lot*distFromStart;
+    const avgPipsFromStart = weightedPipsSum/lotSum;
+
+    let avgLabel;
+    if(!isNaN(entryPrice) && entryPrice > 0){
+      const avgPrice = direction === 'buy'
+        ? entryPrice - avgPipsFromStart*0.01
+        : entryPrice + avgPipsFromStart*0.01;
+      avgLabel = avgPrice.toFixed(2);
+    } else {
+      avgLabel = (direction === 'buy' ? '−' : '+') + fmt(avgPipsFromStart) + 'p';
+    }
+
+    rows.push({i, lot, lossUsc, cumLossUsc, avgLabel});
   }
 
   const totalLossUsc = cumLossUsc;
@@ -339,6 +373,7 @@ function compute(){
     <tr>
       <td>${r.i}</td>
       <td>${fmt(r.lot)}</td>
+      <td>${r.avgLabel}</td>
       <td class="loss">−$${fmt(r.lossUsc/100)}</td>
       <td class="loss">−$${fmt(r.cumLossUsc/100)}</td>
     </tr>
@@ -375,6 +410,7 @@ function compute(){
 }
 
 document.querySelectorAll('input').forEach(el => el.addEventListener('input', compute));
+document.querySelectorAll('select').forEach(el => el.addEventListener('change', compute));
 compute();
 
 if('serviceWorker' in navigator){
