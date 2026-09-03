@@ -112,7 +112,8 @@
     line-height:1.5; margin-top:14px; padding-top:14px; border-top:1px solid var(--line);
   }
 
-  .cards{display:grid; grid-template-columns:repeat(4,1fr); gap:12px; margin-bottom:20px;}
+  .cards{display:grid; grid-template-columns:repeat(5,1fr); gap:12px; margin-bottom:20px;}
+  @media(max-width:900px){.cards{grid-template-columns:repeat(3,1fr);}}
   @media(max-width:700px){.cards{grid-template-columns:repeat(2,1fr);}}
   .card{
     background:var(--panel); border:1px solid var(--line); border-radius:6px; padding:14px 16px;
@@ -123,6 +124,7 @@
     color:var(--text);
   }
   .card.loss .v{color:var(--loss);}
+  .card.profit .v{color:var(--ok);}
   .card .v small{font-size:11px; color:var(--text-dim); font-weight:400;}
 
   .curve-wrap{
@@ -185,6 +187,11 @@
         <input type="number" id="addPips" value="100" step="1" min="1">
       </div>
 
+      <div class="field">
+        <label>Take Profit <span class="hint">pips dari rata-rata</span></label>
+        <input type="number" id="tpPips" value="100" step="1" min="0">
+      </div>
+
       <div class="toggle" id="multToggle">
         <span>Aktifkan Lot Multiplier</span>
         <div class="switch"></div>
@@ -236,6 +243,7 @@
       <div class="note">
         Asumsi default: XAUUSD kontrak 100oz, 1 pip = $0.01 → 0.01 lot × 1 pip ≈ 1 USC (1 sen).
         Sesuaikan "Nilai per Pip" di atas jika spesifikasi broker Anda berbeda.
+        Profit @ TP dihitung dari harga rata-rata seluruh posisi (basket TP), bukan dari posisi pertama.
         Perhitungan tidak memperhitungkan spread, swap, atau komisi.
       </div>
     </div>
@@ -316,6 +324,7 @@ function compute(){
   const balanceUsd = parseFloat($('balance').value);
   const entryPrice = parseFloat($('entryPrice').value);
   const direction = $('direction').value;
+  const tpPips = parseFloat($('tpPips').value) || 0;
 
   const rows = [];
   let totalLot = 0;
@@ -327,6 +336,7 @@ function compute(){
   let cumLossUsc = 0;
   let lotSum = 0;
   let weightedPipsSum = 0;
+  let finalAvgPipsFromStart = 0;
   for(let i=1;i<=n;i++){
     const lot = lots[i-1];
     const lossUsc = (lot/0.01) * pipValue * ((n-i)*addPips);
@@ -337,6 +347,7 @@ function compute(){
     lotSum += lot;
     weightedPipsSum += lot*distFromStart;
     const avgPipsFromStart = weightedPipsSum/lotSum;
+    finalAvgPipsFromStart = avgPipsFromStart;
 
     let avgLabel;
     if(!isNaN(entryPrice) && entryPrice > 0){
@@ -355,10 +366,25 @@ function compute(){
   const totalLossUsd = totalLossUsc/100;
   const worstDistPips = (n-1)*addPips;
 
+  // profit at basket TP (measured from weighted average entry price)
+  const totalProfitUsc = (totalLot/0.01) * pipValue * tpPips;
+  const totalProfitUsd = totalProfitUsc/100;
+  let tpPriceLabel = null;
+  if(!isNaN(entryPrice) && entryPrice > 0){
+    const tpPrice = direction === 'buy'
+      ? entryPrice - finalAvgPipsFromStart*0.01 + tpPips*0.01
+      : entryPrice + finalAvgPipsFromStart*0.01 - tpPips*0.01;
+    tpPriceLabel = tpPrice.toFixed(2);
+  }
+
   // cards
   let ddPct = null;
   if(!isNaN(balanceUsd) && balanceUsd > 0){
     ddPct = (totalLossUsd/balanceUsd)*100;
+  }
+  let profitPct = null;
+  if(!isNaN(balanceUsd) && balanceUsd > 0){
+    profitPct = (totalProfitUsd/balanceUsd)*100;
   }
 
   $('cards').innerHTML = `
@@ -366,6 +392,7 @@ function compute(){
     <div class="card"><div class="k">Total Lot</div><div class="v">${fmt(totalLot)}</div></div>
     <div class="card"><div class="k">Jarak Terjauh</div><div class="v">${fmtUsc(worstDistPips)}<small> pips</small></div></div>
     <div class="card loss"><div class="k">Total Drawdown</div><div class="v">$${fmt(totalLossUsd)}${ddPct!==null?`<small> · ${fmt(ddPct)}%</small>`:''}</div></div>
+    <div class="card profit"><div class="k">Profit @ TP${tpPriceLabel?` (${tpPriceLabel})`:''}</div><div class="v">$${fmt(totalProfitUsd)}${profitPct!==null?`<small> · ${fmt(profitPct)}%</small>`:''}</div></div>
   `;
 
   // table
