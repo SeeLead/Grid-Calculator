@@ -1,4 +1,4 @@
-const CACHE = "dd-grid-xau-v2";
+const CACHE = "dd-grid-xau-v5";
 const ASSETS = ["./index.html", "./manifest.json", "./icon-192.png", "./icon-512.png"];
 
 self.addEventListener("install", e => {

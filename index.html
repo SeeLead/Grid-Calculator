@@ -127,16 +127,6 @@
   .card.profit .v{color:var(--ok);}
   .card .v small{font-size:11px; color:var(--text-dim); font-weight:400;}
 
-  .curve-wrap{
-    background:var(--panel); border:1px solid var(--line); border-radius:6px; padding:18px 18px 8px;
-    margin-bottom:20px;
-  }
-  .curve-wrap h2{
-    font-size:12px; text-transform:uppercase; letter-spacing:0.1em; color:var(--gold);
-    margin:0 0 4px; font-weight:600;
-  }
-  .curve-wrap .desc{font-family:'IBM Plex Mono',monospace; font-size:10.5px; color:var(--text-dim); margin-bottom:10px;}
-
   table{width:100%; border-collapse:collapse; font-family:'IBM Plex Mono',monospace; font-size:12.5px;}
   thead th{
     text-align:right; font-size:10px; text-transform:uppercase; letter-spacing:0.06em;
@@ -149,7 +139,8 @@
   .tbl-wrap{
     background:var(--panel); border:1px solid var(--line); border-radius:6px; overflow:hidden;
   }
-  .tbl-scroll{max-height:480px; overflow-y:auto;}
+  .tbl-scroll{max-height:480px; overflow-y:auto; overflow-x:auto;}
+  table{min-width:640px;}
   .tbl-wrap h2{
     font-size:12px; text-transform:uppercase; letter-spacing:0.1em; color:var(--gold);
     margin:0; font-weight:600; padding:16px 18px 10px;
@@ -251,12 +242,6 @@
     <div>
       <div class="cards" id="cards"></div>
 
-      <div class="curve-wrap">
-        <h2>Kurva Drawdown</h2>
-        <div class="desc">akumulasi floating loss per posisi terbuka</div>
-        <svg id="curve" viewBox="0 0 640 180" style="width:100%;height:180px;"></svg>
-      </div>
-
       <div class="tbl-wrap">
         <h2>Rincian per Posisi</h2>
         <div class="tbl-scroll">
@@ -265,8 +250,11 @@
               <tr>
                 <th>#</th>
                 <th>Lot</th>
+                <th>Harga</th>
                 <th>Rata-rata</th>
+                <th>TP</th>
                 <th>Loss Posisi</th>
+                <th>Profit TP</th>
                 <th>Kumulatif</th>
               </tr>
             </thead>
@@ -337,6 +325,7 @@ function compute(){
   let lotSum = 0;
   let weightedPipsSum = 0;
   let finalAvgPipsFromStart = 0;
+
   for(let i=1;i<=n;i++){
     const lot = lots[i-1];
     const lossUsc = (lot/0.01) * pipValue * ((n-i)*addPips);
@@ -347,7 +336,17 @@ function compute(){
     lotSum += lot;
     weightedPipsSum += lot*distFromStart;
     const avgPipsFromStart = weightedPipsSum/lotSum;
-    finalAvgPipsFromStart = avgPipsFromStart;
+    finalAvgPipsFromStart = avgPipsFromStart; // last iteration = avg once all N are open
+
+    let priceLabel;
+    if(!isNaN(entryPrice) && entryPrice > 0){
+      const posPrice = direction === 'buy'
+        ? entryPrice - distFromStart*0.01
+        : entryPrice + distFromStart*0.01;
+      priceLabel = posPrice.toFixed(2);
+    } else {
+      priceLabel = i===1 ? '±0p' : (direction === 'buy' ? '−' : '+') + fmt(distFromStart) + 'p';
+    }
 
     let avgLabel;
     if(!isNaN(entryPrice) && entryPrice > 0){
@@ -359,14 +358,28 @@ function compute(){
       avgLabel = (direction === 'buy' ? '−' : '+') + fmt(avgPipsFromStart) + 'p';
     }
 
-    rows.push({i, lot, lossUsc, cumLossUsc, avgLabel});
+    // TP price & profit assuming grid stops at THIS position (1..i open),
+    // basket TP measured from the running average up to this position
+    let tpLabel;
+    if(!isNaN(entryPrice) && entryPrice > 0){
+      const tpPrice = direction === 'buy'
+        ? entryPrice - avgPipsFromStart*0.01 + tpPips*0.01
+        : entryPrice + avgPipsFromStart*0.01 - tpPips*0.01;
+      tpLabel = tpPrice.toFixed(2);
+    } else {
+      const tpPipsFromStart = avgPipsFromStart - tpPips;
+      tpLabel = (direction === 'buy' ? '−' : '+') + fmt(tpPipsFromStart) + 'p';
+    }
+    const profitTpUsc = (lotSum/0.01) * pipValue * tpPips;
+
+    rows.push({i, lot, lossUsc, cumLossUsc, priceLabel, avgLabel, tpLabel, profitTpUsc});
   }
 
   const totalLossUsc = cumLossUsc;
   const totalLossUsd = totalLossUsc/100;
   const worstDistPips = (n-1)*addPips;
 
-  // profit at basket TP (measured from weighted average entry price)
+  // profit at basket TP once all N positions are open (measured from final average)
   const totalProfitUsc = (totalLot/0.01) * pipValue * tpPips;
   const totalProfitUsd = totalProfitUsc/100;
   let tpPriceLabel = null;
@@ -396,44 +409,23 @@ function compute(){
   `;
 
   // table
-  $('tbody').innerHTML = rows.map(r => `
+  $('tbody').innerHTML = rows.map(r => {
+    const profitUsd = r.profitTpUsc/100;
+    const profitCls = profitUsd >= 0 ? '' : 'loss';
+    const profitSign = profitUsd >= 0 ? '+' : '−';
+    return `
     <tr>
       <td>${r.i}</td>
       <td>${fmt(r.lot)}</td>
+      <td>${r.priceLabel}</td>
       <td>${r.avgLabel}</td>
+      <td>${r.tpLabel}</td>
       <td class="loss">−$${fmt(r.lossUsc/100)}</td>
+      <td class="${profitCls}">${profitSign}$${fmt(Math.abs(profitUsd))}</td>
       <td class="loss">−$${fmt(r.cumLossUsc/100)}</td>
     </tr>
-  `).join('');
-
-  // curve svg
-  const W=640,H=180,padL=40,padR=10,padT=10,padB=20;
-  const maxCum = Math.max(1, cumLossUsc);
-  const stepX = (W-padL-padR)/Math.max(1,n-1);
-  let pathD = '';
-  let points = [];
-  rows.forEach((r,idx) => {
-    const x = padL + idx*stepX;
-    const y = padT + (r.cumLossUsc/maxCum)*(H-padT-padB);
-    points.push([x,y]);
-    pathD += (idx===0?'M':'L') + x.toFixed(1) + ',' + y.toFixed(1) + ' ';
-  });
-  const areaD = pathD + `L${(padL+(n-1)*stepX).toFixed(1)},${H-padB} L${padL},${H-padB} Z`;
-
-  let gridLines = '';
-  for(let g=0; g<=4; g++){
-    const y = padT + g*(H-padT-padB)/4;
-    gridLines += `<line x1="${padL}" y1="${y}" x2="${W-padR}" y2="${y}" stroke="#1c2027" stroke-width="1"/>`;
-  }
-
-  $('curve').innerHTML = `
-    ${gridLines}
-    <text x="4" y="${padT+4}" font-family="IBM Plex Mono" font-size="9" fill="#5c6169">-$${fmt(maxCum/100)}</text>
-    <text x="4" y="${H-padB}" font-family="IBM Plex Mono" font-size="9" fill="#5c6169">$0</text>
-    <path d="${areaD}" fill="#c1443c" opacity="0.12"/>
-    <path d="${pathD}" fill="none" stroke="#c1443c" stroke-width="2"/>
-    ${points.map(p=>`<circle cx="${p[0]}" cy="${p[1]}" r="2.5" fill="#c1443c"/>`).join('')}
   `;
+  }).join('');
 }
 
 document.querySelectorAll('input').forEach(el => el.addEventListener('input', compute));
